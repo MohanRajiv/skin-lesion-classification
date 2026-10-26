@@ -1,0 +1,6 @@
+
+# Local data and environment
+data/raw/
+data/processed/
+.venv/
+models/
