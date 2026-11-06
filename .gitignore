@@ -4,3 +4,6 @@ data/raw/
 data/processed/
 .venv/
 models/
+
+# Model outputs
+outputs/
