@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader, Dataset
 from PIL import Image
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
@@ -115,6 +116,14 @@ def main(args):
             {'params': model.fc.parameters(), 'lr': 1e-3}
         ], weight_decay=1e-4)
 
+    # Learning rate scheduler: linear warmup then cosine decay
+    warmup_epochs = args.warmup_epochs
+    cosine_epochs = max(args.epochs - warmup_epochs, 1)
+
+    warmup_scheduler = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_epochs)
+    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=cosine_epochs, eta_min=1e-6)
+    scheduler = SequentialLR(optimizer,schedulers=[warmup_scheduler, cosine_scheduler],milestones=[warmup_epochs])
+
     counts = np.bincount(train_df["label"], minlength=NUM_CLASSES)
     weights = len(train_df) / (NUM_CLASSES * counts)
     class_weights = torch.FloatTensor(weights).to(device)
@@ -150,7 +159,8 @@ def main(args):
             'validation_accuracy': val_acc,
             'validation_macro_f1': val_f1
         })
-        print(f"Epoch {epoch}/{args.epochs} - val_acc: {val_acc:.4f} - val_f1: {val_f1:.4f}")
+        current_lrs = [f"{g['lr']:.2e}" for g in optimizer.param_groups]
+        print(f"Epoch {epoch}/{args.epochs} - val_acc: {val_acc:.4f} - val_f1: {val_f1:.4f} - lr: {current_lrs}")
 
         # save best model based on macro F1
         if val_f1 > best_f1:
@@ -161,6 +171,8 @@ def main(args):
                 'best_val_macro_f1': best_f1,
                 'classes': CLASSES
             }, ckpt_path)
+
+        scheduler.step()
 
     df_hist = pd.DataFrame(history)
     df_hist.to_csv(args.output_dir / "validation_metrics.csv", index=False)
@@ -191,6 +203,7 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/resnet50"))
     parser.add_argument("--fine-tune-all", action="store_true")
+    parser.add_argument("--warmup-epochs", type=int, default=3)
     parser.add_argument("--evaluate-test", action="store_true")
     
     args = parser.parse_args()
